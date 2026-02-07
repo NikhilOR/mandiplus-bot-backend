@@ -1,0 +1,133 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("ADMIN") // ADMIN, SUPER_ADMIN
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  adminActions    AdminAction[]
+  approvedRequests InsuranceRequest[] @relation("ApprovedBy")
+
+  @@map("users")
+}
+
+model InsuranceRequest {
+  id                String    @id @default(uuid())
+  
+  // USER ID & TIMESTAMP (from your sheet)
+  userId            String    @unique // 916209415125
+  timestamp         DateTime  // 1770257577
+  
+  // SUPPLIER & PARTY INFO
+  supplierName      String?
+  supplierPlace     String?
+  partyName         String?
+  partyAddress      String?   @db.Text
+  
+  // ITEM INFO
+  itemName          String
+  quantity          Int
+  rate              Decimal?  @db.Decimal(10, 2)
+  
+  // VEHICLE & TRANSPORT
+  vehicleNo         String    // Vehicle Number
+  transporterName   String?
+  
+  // COMMISSION & INVOICE
+  cashCommission    String?   // Cash/Commission
+  invoiceType       String?   // buyer invoice / buyer invoice
+  kantaParchiImage  String?   @db.Text // URL to image
+  
+  // CONSENT
+  consent           Boolean   @default(false)
+  
+  // WORKFLOW STATUS
+  status            String    @default("PENDING_VERIFICATION")
+  // PENDING_VERIFICATION, APPROVED, REJECTED, PAYMENT_PENDING, PAID, POLICY_ISSUED
+  
+  // Admin Action
+  adminId           String?
+  admin           User?     @relation("ApprovedBy", fields: [adminId], references: [id], onDelete: SetNull)
+  adminAction       String?   // APPROVED, REJECTED
+  adminTimestamp    DateTime?
+  rejectionReason   String?   @db.Text
+  
+  // Invoice (Generated after approval)
+  invoiceNumber     String?   @unique
+  premiumAmount     Decimal?  @db.Decimal(10, 2)
+  invoicePdfUrl     String?   @db.Text
+  
+  // Payment
+  paymentLink       String?   @db.Text
+  paymentStatus     String?   @default("PENDING") // PENDING, SUCCESS, FAILED
+  paymentId         String?
+  paymentTimestamp  DateTime?
+  
+  // Policy
+  policyNumber      String?   @unique
+  policyPdfUrl      String?   @db.Text
+  policyStartDate   DateTime?
+  policyEndDate     DateTime?
+  
+  // Auto Timestamps
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relationships
+  adminActions      AdminAction[]
+  payments          Payment[]
+
+  @@map("insurance_requests")
+  @@index([userId])
+  @@index([vehicleNo])
+  @@index([status])
+}
+
+model AdminAction {
+  id          String   @id @default(uuid())
+  adminId     String
+  admin       User     @relation(fields: [adminId], references: [id])
+  requestId   String
+  request     InsuranceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  action      String   // APPROVED, REJECTED, VIEWED
+  reason      String?  @db.Text
+  ipAddress   String?
+  timestamp   DateTime @default(now())
+
+  @@map("admin_actions")
+  @@index([adminId])
+  @@index([requestId])
+}
+
+model Payment {
+  id              String   @id @default(uuid())
+  requestId       String
+  request         InsuranceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  
+  paymentGateway  String   // razorpay, phonepe
+  transactionId   String   @unique
+  amount          Decimal  @db.Decimal(10, 2)
+  status          String   // SUCCESS, FAILED, PENDING
+  gatewayResponse Json?
+  
+  createdAt       DateTime @default(now())
+
+  @@map("payments")
+  @@index([requestId])
+  @@index([transactionId])
+}
