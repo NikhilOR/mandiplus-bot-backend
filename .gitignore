@@ -30,6 +30,7 @@ build/
 # Uploads
 uploads/
 temp/
+invoices/
 
 # Testing
 coverage/

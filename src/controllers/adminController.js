@@ -2,6 +2,7 @@
 const prisma = require('../config/database');
 const { validationResult } = require('express-validator');
 const { sendChatraceMessage } = require('../services/chatraceService');
+const { generateInvoicePdf } = require('../services/invoicePdfService');
 /**
  * Get all pending insurance requests
  * GET /api/admin/pending
@@ -122,14 +123,18 @@ exports.approveRequest = async (req, res) => {
       });
     }
 
-    // Calculate premium
+    // Use base premium already set at request creation, or recalculate (0.2% of quantity × rate) for older requests; cap at Decimal(10,2) max
+    const MAX_PREMIUM = 99999999.99;
     const totalValue = parseFloat(request.quantity) * parseFloat(request.rate || 0);
-    const premiumAmount = totalValue * 0.01;
+    let premiumAmount = request.premiumAmount != null
+      ? parseFloat(request.premiumAmount)
+      : totalValue * 0.002;
+    if (premiumAmount > MAX_PREMIUM) premiumAmount = MAX_PREMIUM;
     const invoiceNumber = `INV${Date.now()}`;
     const paymentLink = `https://razorpay.me/temp-link-${invoiceNumber}`;
 
-    // Update request
-    const updatedRequest = await prisma.insuranceRequest.update({
+    // Update request (approval)
+    let updatedRequest = await prisma.insuranceRequest.update({
       where: { id },
       data: {
         status: 'APPROVED',
@@ -142,17 +147,35 @@ exports.approveRequest = async (req, res) => {
       }
     });
 
+    // Generate invoice PDF (non-blocking: do not fail approval if PDF errors)
+    let invoicePdfUrl = null;
+    try {
+      const pdfFilename = await generateInvoicePdf(request, invoiceNumber, premiumAmount);
+      const port = process.env.PORT || 5000;
+      const serverUrl = (process.env.APP_URL || `http://localhost:${port}`).replace(/\/$/, '');
+      invoicePdfUrl = `${serverUrl}/invoices/${pdfFilename}`;
+      updatedRequest = await prisma.insuranceRequest.update({
+        where: { id },
+        data: { invoicePdfUrl }
+      });
+    } catch (pdfErr) {
+      console.warn('⚠️ Invoice PDF generation failed (approval still succeeded):', pdfErr.message);
+    }
+
     console.log(`✅ Request ${id} approved`);
 
-    // Send WhatsApp notification
-    const message = 
-      `🎉 *Your Insurance Request is APPROVED!*\n\n` +
-      `Invoice Number: ${invoiceNumber}\n` +
-      `Premium Amount: ₹${premiumAmount.toFixed(2)}\n\n` +
-      `Please complete payment using this link:\n${paymentLink}\n\n` +
-      `After payment, your policy will be issued within 24 hours.`;
-
-    await sendChatraceMessage(request.userId, message);
+    // Send WhatsApp notification (non-blocking: do not fail approval if Chatrace errors)
+    try {
+      const message =
+        `🎉 *Your Insurance Request is APPROVED!*\n\n` +
+        `Invoice Number: ${invoiceNumber}\n` +
+        `Premium Amount: ₹${premiumAmount.toFixed(2)}\n\n` +
+        `Please complete payment using this link:\n${paymentLink}\n\n` +
+        `After payment, your policy will be issued within 24 hours.`;
+      await sendChatraceMessage(request.userId, message);
+    } catch (msgErr) {
+      console.warn('⚠️ WhatsApp/Chatrace message failed (approval still succeeded):', msgErr.message);
+    }
 
     return res.status(200).json({
       success: true,
@@ -162,6 +185,7 @@ exports.approveRequest = async (req, res) => {
         invoiceNumber: updatedRequest.invoiceNumber,
         premiumAmount: updatedRequest.premiumAmount,
         paymentLink: updatedRequest.paymentLink,
+        invoicePdfUrl: updatedRequest.invoicePdfUrl || null,
         status: updatedRequest.status
       }
     });

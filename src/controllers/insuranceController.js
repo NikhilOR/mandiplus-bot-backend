@@ -113,6 +113,14 @@ exports.createInsuranceRequest = async (req, res) => {
       });
     }
 
+    // Base premium at creation: 0.2% of (quantity × rate); cap at Decimal(10,2) max
+    const qty = parseInt(quantity);
+    const rateNum = rate ? parseFloat(rate) : 0;
+    const totalValue = qty * rateNum;
+    const MAX_PREMIUM = 99999999.99;
+    let basePremiumAmount = totalValue * 0.002;
+    if (basePremiumAmount > MAX_PREMIUM) basePremiumAmount = MAX_PREMIUM;
+
     // Create insurance request
     const insuranceRequest = await prisma.insuranceRequest.create({
       data: {
@@ -123,15 +131,16 @@ exports.createInsuranceRequest = async (req, res) => {
         partyName: partyName || null,
         partyAddress: partyAddress || null,
         itemName,
-        quantity: parseInt(quantity),
-        rate: rate ? parseFloat(rate) : null,
+        quantity: qty,
+        rate: rateNum || null,
         vehicleNo,
         transporterName: transporterName || null,
         cashCommission: cashCommission || null,
         invoiceType: invoiceType || null,
         kantaParchiImage: kantaParchiImage || null,
         consent: consentValue,
-        status: 'PENDING_VERIFICATION'
+        status: 'PENDING_VERIFICATION',
+        premiumAmount: basePremiumAmount
       }
     });
 

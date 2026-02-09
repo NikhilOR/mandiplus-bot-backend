@@ -1,5 +1,6 @@
 // server.js
 const express = require('express');
+const path = require('path');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -64,6 +65,10 @@ const adminRoutes = require('./src/routes/admin');
 // Use routes
 app.use('/api/insurance', insuranceRoutes);
 app.use('/api/admin', adminRoutes);
+
+// Serve generated invoice PDFs (e.g. /invoices/INV123.pdf)
+const invoicesDir = path.join(__dirname, 'invoices');
+app.use('/invoices', express.static(invoicesDir));
 
 /**
  * @swagger
